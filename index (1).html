@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e8eef3">
+<title>Repérage sonore de la cantine</title>
+<style>
+  :root{
+    --bg:#e8eef3; --ink:#1f3a4d; --icon:#4b6b80;
+    /* Palette par défaut (écrasée par le curseur d'intensité) */
+    --g-bg:#c4e8cd; --g-ink:#0a2410; --g-icon:#2a6a40;
+    --o-bg:#fbd9a5; --o-ink:#2b1800; --o-icon:#8a4a00;
+    --r-bg:#f3b7b0; --r-ink:#2a0805; --r-icon:#8e2018;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-user-select:none;user-select:none;touch-action:manipulation}
+  body{background:var(--bg);color:var(--ink);transition:background-color 1.6s ease,color 1.6s ease}
+  body.idle  {--bg:#e8eef3;--ink:#1f3a4d;--icon:#4b6b80}
+  body.green {--bg:var(--g-bg);--ink:var(--g-ink);--icon:var(--g-icon)}
+  body.orange{--bg:var(--o-bg);--ink:var(--o-ink);--icon:var(--o-icon)}
+  body.red   {--bg:var(--r-bg);--ink:var(--r-ink);--icon:var(--r-icon)}
+
+  /* ---------- Écran principal ---------- */
+  .screen{height:100dvh;width:100%;display:flex;flex-direction:column;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  .stage{position:relative;flex:1;min-height:0}
+  .state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:2.2vh;padding:2vh 6vw;opacity:0;visibility:hidden;
+    transition:opacity .4s ease,visibility 0s linear .4s}
+  .state.on{opacity:1;visibility:visible;transition:opacity .9s ease .4s,visibility 0s linear .4s}
+
+  h1{margin:0;text-align:center;font-size:min(9.6vw,9.2vh);font-weight:800;letter-spacing:.03em;line-height:1.1;text-wrap:balance}
+  .m{margin:0;text-align:center;font-size:min(6.4vw,5.2vh);font-weight:500;line-height:1.3;text-wrap:balance;max-width:92vw}
+  .m.strong{font-weight:700}
+  .sep{width:28%;height:2px;border-radius:1px;background:currentColor;opacity:.28;margin:.2vh 0}
+  .icon{width:min(14vw,12vh);height:min(14vw,12vh);color:var(--icon);opacity:.75;flex:none}
+
+  .sub{font-size:min(4.6vw,3.8vh);opacity:.8;margin:0}
+  .notice{min-height:1.3em;margin:0;font-size:min(4.4vw,3.6vh);font-weight:600;max-width:90vw;text-wrap:balance;color:#8a3b12}
+  .big{border:0;border-radius:22px;background:#1f3a4d;color:#fff;font-size:min(7vw,5.5vh);font-weight:800;
+       letter-spacing:.06em;padding:2.2vh 9vw;min-height:64px}
+
+  /* Pied : signature + bouton Réglages */
+  .foot{flex:none;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0 14px 12px}
+  .signature{margin:0;text-align:center;font-size:min(4vw,3.1vh);font-weight:500;opacity:.8;text-wrap:balance}
+  .setbtn{align-self:flex-end;display:flex;align-items:center;gap:12px;min-height:68px;padding:0 24px 0 20px;
+    border:2px solid rgba(0,0,0,.16);border-radius:22px;background:rgba(0,0,0,.07);color:var(--ink);
+    font:inherit;font-size:22px;font-weight:700;opacity:.8;touch-action:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;transition:background-color .2s ease}
+  .setbtn svg{width:34px;height:34px;flex:none}
+  .setbtn.holding{background:rgba(0,0,0,.2)}
+
+  @media (orientation:landscape) and (max-height:520px){
+    .foot{flex-direction:row;justify-content:space-between;align-items:center;padding:0 12px 8px}
+    .signature{flex:1;font-size:min(3vw,4.6vh)}
+    .setbtn{min-height:56px;font-size:18px;padding:0 18px 0 14px}
+    .setbtn svg{width:28px;height:28px}
+    .state{gap:1.6vh;padding:1vh 5vw}
+    .icon{width:min(9vw,13vh);height:min(9vw,13vh)}
+    h1{font-size:min(6vw,10vh)}
+    .m{font-size:min(3.6vw,6vh)}
+  }
+
+  /* ---------- Panneau adulte ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-end;justify-content:center;z-index:10}
+  .overlay.open{display:flex}
+  .sheet{background:#fff;color:#111827;width:100%;max-width:600px;max-height:96dvh;overflow:auto;
+    border-radius:22px 22px 0 0;padding:18px 18px max(24px,env(safe-area-inset-bottom));
+    -webkit-user-select:text;user-select:text;touch-action:pan-y}
+  .sheet h2{margin:0 0 4px;font-size:22px}
+  .sheet h3{margin:26px 0 8px;font-size:18px;padding-top:16px;border-top:1px solid #e5e7eb}
+  .sheet p,.sheet li{font-size:15px;line-height:1.45;color:#374151}
+  .sheet .small{font-size:13px;color:#6b7280;margin:4px 0}
+  .close{float:right;background:#e5e7eb;border:0;border-radius:12px;padding:10px 16px;font-size:15px;font-weight:700;color:#111827}
+  .sbtn{border:0;border-radius:14px;padding:15px 16px;font-size:16px;font-weight:700;background:#1f3a4d;color:#fff;width:100%;margin-top:8px}
+  .sbtn.alt{background:#e5e7eb;color:#111827}
+  .sbtn.warnb{background:#9a3412}
+  .sbtn:disabled{opacity:.45}
+  .pair{display:flex;gap:10px}
+  .pair .sbtn{flex:1}
+  .readout{background:#f3f4f6;border-radius:12px;padding:10px 12px;font-size:14px;color:#111827;margin-top:8px}
+  .warn{background:#fef3c7;border-radius:12px;padding:10px 12px;font-size:14px;color:#78350f;margin-top:10px}
+  details{margin-top:14px;background:#f9fafb;border-radius:12px;padding:10px 12px}
+  summary{font-weight:700;font-size:16px}
+  .foot2{margin-top:20px;text-align:center;font-weight:700;color:#1f3a4d}
+
+  .trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+  .card{background:#f3f4f6;border-radius:14px;padding:10px 6px;text-align:center}
+  .card .cl{display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:700;color:#374151}
+  .card .cv{display:block;margin-top:4px;font-size:21px;font-weight:800;color:#111827;font-variant-numeric:tabular-nums}
+  .dot{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none}
+  .total{margin:10px 0 0;text-align:center}
+  .pie{display:flex;justify-content:center;margin:14px 0 4px}
+  .pie svg{width:min(60vw,240px);height:min(60vw,240px)}
+  .legend{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .legend li{display:flex;align-items:center;gap:10px;font-size:15px;color:#111827}
+  .legend .pc{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums}
+  .hist-row{padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827}
+  .hist-row:last-child{border-bottom:0}
+
+  .range-labels{display:flex;justify-content:space-between;font-weight:800;font-size:14px;letter-spacing:.06em;margin-top:6px}
+  input[type=range]{width:100%;height:44px;accent-color:#1f3a4d;margin:2px 0}
+  .swatches{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+  .sw{border-radius:14px;padding:16px 6px;text-align:center;font-weight:800;font-size:14px;line-height:1.2}
+
+  .stepper-label{margin-top:14px;font-weight:700;font-size:15px}
+  .stepper{display:flex;align-items:center;gap:10px;margin-top:6px}
+  .stepper button{width:60px;height:52px;border:0;border-radius:14px;background:#e5e7eb;font-size:26px;font-weight:800;color:#111827}
+  .stepper .val{flex:1;text-align:center;font-weight:700;font-size:16px;background:#f3f4f6;border-radius:12px;padding:14px 6px}
+
+  /* Calibration en cours */
+  .cal{position:fixed;inset:0;z-index:20;background:#e8eef3;color:#1f3a4d;display:none;flex-direction:column;
+       align-items:center;justify-content:center;text-align:center;padding:6vw;gap:3vh}
+  .cal.open{display:flex}
+  .cal .t{font-size:min(7vw,6vh);font-weight:700;line-height:1.25;text-wrap:balance;max-width:92vw}
+  .cal .count{font-size:min(24vw,22vh);font-weight:800;line-height:1}
+
+  /* Confirmation */
+  .confirm{position:fixed;inset:0;z-index:30;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;padding:20px}
+  .confirm.open{display:flex}
+  .confirm .box{background:#fff;color:#111827;border-radius:20px;padding:20px;max-width:420px;width:100%}
+  .confirm p{margin:0 0 8px;font-size:17px;line-height:1.4;color:#111827}
+
+  @media (prefers-reduced-motion:reduce){
+    body,.state,.state.on{transition-duration:.01s;transition-delay:0s}
+  }
+</style>
+</head>
+<body class="idle">
+
+<div class="screen">
+  <main class="stage" id="stage" role="status" aria-live="polite">
+
+    <!-- Attente (adulte) -->
+    <section class="state on" id="s-idle">
+      <h1>REPÉRAGE SONORE</h1>
+      <p class="sub">Outil pédagogique pour la cantine</p>
+      <p class="notice" id="notice"></p>
+      <button class="big" id="startBtn">DÉMARRER</button>
+    </section>
+
+    <!-- VERT -->
+    <section class="state" id="s-green" aria-hidden="true">
+      <svg class="icon" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+        <path d="M30.5 58V32h3v26z"/>
+        <path d="M31 38C17 38 10 30 10 18c13 0 21 7 21 20z"/>
+        <path d="M33 31C33 18 41 10 54 10c0 13-8 21-21 21z"/>
+      </svg>
+      <h1>AMBIANCE AGRÉABLE</h1>
+      <p class="m strong">« Bravo, nous pouvons discuter tranquillement&nbsp;! »</p>
+      <p class="m">« Continuons ainsi, en prenant soin les uns des autres. »</p>
+    </section>
+
+    <!-- ORANGE -->
+    <section class="state" id="s-orange" aria-hidden="true">
+      <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M14 26q9 6 0 12"/>
+        <path d="M26 19q16 13 0 26"/>
+        <path d="M38 12q23 20 0 40"/>
+      </svg>
+      <h1>AMBIANCE ANIMÉE</h1>
+      <p class="m strong">« Attention, nos voix montent&nbsp;! »</p>
+      <p class="m">« Baissons un peu le volume pour retrouver une ambiance agréable. »</p>
+    </section>
+
+    <!-- ROUGE -->
+    <section class="state" id="s-red" aria-hidden="true">
+      <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M24 56c8 0 12-6 12-12 0-7 12-9 12-20 0-10-8-17-18-17S14 14 14 25v8"/>
+        <path d="M28 24c5 0 8 4 6 9-2 4-6 5-6 10"/>
+      </svg>
+      <h1>AMBIANCE TROP BRUYANTE</h1>
+      <p class="m strong">« Pensons au confort de chacun. »</p>
+      <div class="sep" aria-hidden="true"></div>
+      <p class="m">« Le respect, c'est aussi permettre aux autres de profiter de leur repas. »</p>
+      <p class="m strong">« Ensemble, retrouvons le calme&nbsp;! »</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p class="signature">Bien manger, bien parler, bien vivre ensemble.</p>
+    <!-- Appui long de 2 secondes pour ouvrir l'espace adulte -->
+    <button class="setbtn" id="setBtn" aria-label="Réglages, espace adulte : maintenir le doigt 2 secondes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+      </svg>
+      <span id="setLabel">Réglages</span>
+    </button>
+  </footer>
+</div>
+
+<!-- Espace adulte -->
+<div class="overlay" id="overlay">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Réglages réservés à l'adulte">
+    <button class="close" id="closeBtn">Fermer</button>
+    <h2>Réglages (adulte)</h2>
+    <p class="small" id="runInfo"></p>
+
+    <div class="pair">
+      <button class="sbtn" id="pStart">DÉMARRER</button>
+      <button class="sbtn warnb" id="pStop">ARRÊTER</button>
+    </div>
+    <button class="sbtn alt" id="fsBtn">Plein écran</button>
+
+    <h3>Temps passé dans chaque ambiance</h3>
+    <p class="small" id="sessInfo"></p>
+    <div class="trio">
+      <div class="card"><span class="cl"><i class="dot" style="background:#3f9b5c"></i>Vert</span><span class="cv" id="d-green">0:00:00</span></div>
+      <div class="card"><span class="cl"><i class="dot" style="background:#f0a030"></i>Orange</span><span class="cv" id="d-orange">0:00:00</span></div>
+      <div class="card"><span class="cl"><i class="dot" style="background:#d9453d"></i>Rouge</span><span class="cv" id="d-red">0:00:00</span></div>
+    </div>
+    <p class="small" style="text-align:center">heures : minutes : secondes</p>
+    <div class="trio">
+      <div class="card"><span class="cl">Vert</span><span class="cv" id="p-green">0 %</span></div>
+      <div class="card"><span class="cl">Orange</span><span class="cv" id="p-orange">0 %</span></div>
+      <div class="card"><span class="cl">Rouge</span><span class="cv" id="p-red">0 %</span></div>
+    </div>
+    <p class="total">Temps total mesuré : <b id="totalT">0:00:00</b></p>
+
+    <div class="pie"><svg id="pie" viewBox="-1.05 -1.05 2.1 2.1" role="img" aria-label="Aucune donnée"></svg></div>
+    <ul class="legend">
+      <li><i class="dot" style="background:#3f9b5c"></i>Vert : ambiance agréable<span class="pc" id="lg-green">0 %</span></li>
+      <li><i class="dot" style="background:#f0a030"></i>Orange : ambiance animée<span class="pc" id="lg-orange">0 %</span></li>
+      <li><i class="dot" style="background:#d9453d"></i>Rouge : ambiance trop bruyante<span class="pc" id="lg-red">0 %</span></li>
+    </ul>
+
+    <div class="pair">
+      <button class="sbtn" id="newSess">Nouvelle séance</button>
+      <button class="sbtn warnb" id="resetCnt">Remettre à zéro</button>
+    </div>
+    <details>
+      <summary>Séances précédentes</summary>
+      <div id="hist"></div>
+      <button class="sbtn alt" id="clearHist">Effacer l'historique</button>
+    </details>
+    <div class="warn" id="storeWarn" style="display:none">Le stockage du navigateur est indisponible (navigation privée ou stockage bloqué) : les compteurs et réglages ne seront pas conservés après fermeture.</div>
+
+    <h3>Intensité des couleurs</h3>
+    <p class="small">Un seul curseur règle ensemble le vert, l'orange et le rouge.</p>
+    <div class="range-labels"><span>PÂLE</span><span>VIF</span></div>
+    <input type="range" id="intens" min="0" max="100" step="1" aria-label="Intensité des couleurs, de pâle à vif">
+    <div class="swatches">
+      <div class="sw" id="sw-green">Agréable</div>
+      <div class="sw" id="sw-orange">Animée</div>
+      <div class="sw" id="sw-red">Trop bruyante</div>
+    </div>
+
+    <h3>Seuils et sensibilité</h3>
+    <p class="small">« + » : l'écran réagit plus tôt. « − » : l'écran est plus tolérant.</p>
+    <div class="stepper-label">Passage du vert à l'orange</div>
+    <div class="stepper"><button data-step="so:-1" aria-label="Plus tolérant">−</button><div class="val" id="v-so"></div><button data-step="so:1" aria-label="Plus sensible">+</button></div>
+    <div class="stepper-label">Passage de l'orange au rouge</div>
+    <div class="stepper"><button data-step="sr:-1" aria-label="Plus tolérant">−</button><div class="val" id="v-sr"></div><button data-step="sr:1" aria-label="Plus sensible">+</button></div>
+    <div class="stepper-label">Sensibilité du microphone (décale les deux seuils ensemble)</div>
+    <div class="stepper"><button data-step="gain:-1" aria-label="Moins sensible">−</button><div class="val" id="v-gain"></div><button data-step="gain:1" aria-label="Plus sensible">+</button></div>
+    <button class="sbtn alt" id="resetBtn">Remettre seuils et sensibilité par défaut</button>
+
+    <h3>Calibration dans la cantine</h3>
+    <p>Quand l'ambiance est <b>agréable</b> (les enfants mangent et discutent calmement), touchez le bouton : l'application écoute 10 secondes et prend ce niveau comme référence pour ce téléphone, à cet endroit.</p>
+    <button class="sbtn" id="calBtn">Calibrer l'ambiance agréable (10 s)</button>
+    <div class="readout" id="calInfo"></div>
+    <div class="warn" id="calWarn" style="display:none"></div>
+
+    <details>
+      <summary>Limites de la mesure</summary>
+      <ul>
+        <li>Cet outil est un <b>repère sonore pédagogique</b>, pas un sonomètre. Le microphone d'un téléphone n'est pas étalonné : il ne mesure pas de décibels réels (dB SPL). Aucune valeur en décibels n'est affichée.</li>
+        <li>L'application compare le son actuel à <b>la référence calibrée</b> : l'indication n'a de sens que par rapport à cette référence.</li>
+        <li>Le résultat dépend de la position du téléphone, de la pièce et du modèle. <b>Recalibrer après tout déplacement.</b></li>
+        <li>Pour une mesure réglementaire, utiliser un sonomètre certifié.</li>
+        <li>Dans un navigateur, la mesure s'arrête si l'écran se verrouille, si Chrome passe en arrière-plan ou si un appel arrive. Le temps n'est alors pas compté.</li>
+        <li>Les compteurs sont enregistrés dans le navigateur de ce téléphone. Ils disparaissent si les données du site sont effacées ou en navigation privée.</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary>Confidentialité</summary>
+      <p>Aucun compte, aucune publicité. Le son est analysé en direct sur le téléphone : <b>rien n'est enregistré ni envoyé</b>. Seuls les réglages et les temps cumulés par ambiance sont mémorisés dans ce navigateur.</p>
+    </details>
+
+    <div class="foot2">Bien manger, bien parler, bien vivre ensemble.</div>
+  </div>
+</div>
+
+<!-- Calibration en cours -->
+<div class="cal" id="cal" role="alert">
+  <div class="t">Mesure de référence en cours.<br>Merci de garder l'ambiance habituelle du repas.</div>
+  <div class="count" id="calCount">10</div>
+</div>
+
+<!-- Confirmation -->
+<div class="confirm" id="confirm" role="alertdialog" aria-modal="true">
+  <div class="box">
+    <p id="confMsg"></p>
+    <div class="pair">
+      <button class="sbtn alt" id="confNo">Annuler</button>
+      <button class="sbtn warnb" id="confYes">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+
+  /* ==PURE== */
+  const KEYS = ['green', 'orange', 'red'];
+  const ORANGE_BASE = 3, RED_BASE = 9, STEP = 2, GAIN_STEP = 1.5, MIN_GAP = 3, HYST = 1.5;
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  // Durée en h:mm:ss, à la seconde près
+  function fmtDuration(ms) {
+    const s = Math.max(0, Math.floor((ms || 0) / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    const p = n => String(n).padStart(2, '0');
+    return h + ':' + p(m) + ':' + p(x);
+  }
+
+  // Pourcentages entiers dont la somme fait 100 (méthode du plus grand reste). Total nul -> 0 / 0 / 0
+  function percents(t) {
+    const out = { green: 0, orange: 0, red: 0 };
+    const v = KEYS.map(k => Math.max(0, t[k] || 0));
+    const tot = v[0] + v[1] + v[2];
+    if (tot <= 0) return out;
+    const raw = v.map(x => x / tot * 100);
+    const fl = raw.map(Math.floor);
+    const rest = 100 - fl[0] - fl[1] - fl[2];
+    const order = raw.map((x, i) => [x - fl[i], i]).sort((a, b) => b[0] - a[0]);
+    for (let j = 0; j < rest; j++) fl[order[j][1]]++;
+    KEYS.forEach((k, i) => { out[k] = fl[i]; });
+    return out;
+  }
+
+  // Secteurs du camembert : angles proportionnels au temps réel, départ en haut, sens horaire
+  function pieSlices(t) {
+    const v = KEYS.map(k => Math.max(0, t[k] || 0));
+    const tot = v[0] + v[1] + v[2];
+    if (tot <= 0) return [];
+    const res = []; let a = 0;
+    KEYS.forEach((k, i) => {
+      const f = v[i] / tot;
+      if (f <= 0) return;
+      res.push({ key: k, frac: f, a0: a, a1: a + f * 360, full: f >= 0.9999 });
+      a += f * 360;
+    });
+    return res;
+  }
+  function slicePath(a0, a1) {
+    const r = x => x * Math.PI / 180;
+    const x0 = Math.sin(r(a0)), y0 = -Math.cos(r(a0)), x1 = Math.sin(r(a1)), y1 = -Math.cos(r(a1));
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    return 'M0 0 L' + x0.toFixed(5) + ' ' + y0.toFixed(5) + ' A1 1 0 ' + large + ' 1 ' + x1.toFixed(5) + ' ' + y1.toFixed(5) + ' Z';
+  }
+
+  // Palette : un seul paramètre t (0 = pâle, 1 = vif) pour les trois couleurs
+  const PAL = {
+    green:  { h: 138, s: [26, 58], l: [91, 68] },
+    orange: { h: 30,  s: [85, 95], l: [89, 64] },
+    red:    { h: 4,   s: [66, 78], l: [91, 70] }
+  };
+  const hsl = (h, s, l) => 'hsl(' + h + ',' + s.toFixed(1) + '%,' + l.toFixed(1) + '%)';
+  function palette(t) {
+    t = Math.min(1, Math.max(0, t));
+    const o = {};
+    KEYS.forEach(k => {
+      const p = PAL[k], s = lerp(p.s[0], p.s[1], t), l = lerp(p.l[0], p.l[1], t);
+      o[k] = { bg: hsl(p.h, s, l), ink: hsl(p.h, 60, 9), icon: hsl(p.h, 45, 26), raw: { h: p.h, s, l } };
+    });
+    return o;
+  }
+
+  // Seuils relatifs à la référence calibrée. so / sr / gain : + = plus sensible
+  function thresholdsFor(c) {
+    const o = c.ref + ORANGE_BASE - STEP * c.so;
+    let r = c.ref + RED_BASE - STEP * c.sr;
+    if (r < o + MIN_GAP) r = o + MIN_GAP;
+    return { o, r };
+  }
+  // Niveau (relatif) -> état visé, avec hystérésis
+  function targetState(l, cur, th) {
+    if (l >= th.r) return 'red';
+    if (cur === 'red' && l >= th.r - HYST) return 'red';
+    if (l >= th.o) return 'orange';
+    if ((cur === 'orange' || cur === 'red') && l >= th.o - HYST) return 'orange';
+    return 'green';
+  }
+  /* ==/PURE== */
+
+  /* ---------- Paramètres de fonctionnement ---------- */
+  const TICK = 200;          // ms entre deux analyses (économe en batterie)
+  const ALPHA = 0.1;         // lissage (échelle logarithmique) ≈ 2 s : un bruit bref (plateau, chaise) ne change pas l'ambiance
+  const UP_DELAY = 2000;     // ms avant de passer à une ambiance plus bruyante
+  const DOWN_DELAY = 4000;   // ms avant de redescendre
+  const HOLD_MS = 2000;      // appui long pour ouvrir l'espace adulte
+  const SAVE_EVERY = 5000;   // sauvegarde des compteurs pendant la mesure
+  const MAX_GAP = 2000;      // un écart plus long entre deux mesures n'est pas compté
+  const HIST_MAX = 20;
+  const KEY = 'cantine-repere-sonore-v2';
+  const RANK = { green: 0, orange: 1, red: 2 };
+  const SENS_LABELS = ['Très tolérant', 'Tolérant', 'Normal', 'Sensible', 'Très sensible'];
+  const GAIN_LABELS = ['Très faible', 'Faible', 'Normale', 'Élevée', 'Très élevée'];
+
+  /* ---------- Données enregistrées ---------- */
+  const zeroTotals = () => ({ green: 0, orange: 0, red: 0 });
+  const num = (v, a, b, d) => (typeof v === 'number' && isFinite(v)) ? Math.min(b, Math.max(a, v)) : d;
+  const int = (v, a, b, d) => Math.round(num(v, a, b, d));
+
+  function defaults() {
+    return { ref: -40, calibrated: false, calTime: null, so: 0, sr: 0, gain: 0, intensity: 50,
+             session: { start: Date.now(), totals: zeroTotals() }, history: [] };
+  }
+  function cleanTotals(t) {
+    const o = zeroTotals();
+    if (t && typeof t === 'object') KEYS.forEach(k => { o[k] = num(t[k], 0, 1e10, 0); });
+    return o;
+  }
+  function sanitize(s, d) {
+    if (!s || typeof s !== 'object') return d;
+    d.ref = num(s.ref, -140, 0, d.ref);
+    d.calibrated = s.calibrated === true;
+    d.calTime = typeof s.calTime === 'number' ? s.calTime : null;
+    d.so = int(s.so, -2, 2, 0); d.sr = int(s.sr, -2, 2, 0); d.gain = int(s.gain, -2, 2, 0);
+    d.intensity = int(s.intensity, 0, 100, 50);
+    if (s.session && typeof s.session === 'object') {
+      d.session = { start: num(s.session.start, 0, 1e15, Date.now()), totals: cleanTotals(s.session.totals) };
+    }
+    if (Array.isArray(s.history)) {
+      d.history = s.history.slice(0, HIST_MAX).map(h => ({
+        start: num(h && h.start, 0, 1e15, 0), end: num(h && h.end, 0, 1e15, 0), totals: cleanTotals(h && h.totals)
+      }));
+    }
+    return d;
+  }
+  let storageOK = true;
+  function load() {
+    const d = defaults();
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return sanitize(JSON.parse(raw), d);
+    } catch (e) {}
+    return d;
+  }
+  let cfg = load();
+  function persist() {
+    try { localStorage.setItem(KEY, JSON.stringify(cfg)); storageOK = true; }
+    catch (e) { storageOK = false; }
+  }
+  try { localStorage.setItem('cantine-test', '1'); localStorage.removeItem('cantine-test'); } catch (e) { storageOK = false; }
+
+  /* ---------- État de fonctionnement ---------- */
+  const S = { running: false, ctx: null, stream: null, analyser: null, buf: null, timer: null, wake: null,
+              smooth: null, cur: 'idle', cand: null, candSince: 0, cal: false, calLv: [] };
+  let lastT = null, lastSave = 0;
+
+  const PREFIX = { green: 'g', orange: 'o', red: 'r' };
+  const NEUTRAL_BG = '#e8eef3';
+  let curPalette = palette(cfg.intensity / 100);
+
+  function applyPalette() {
+    curPalette = palette(cfg.intensity / 100);
+    const st = document.documentElement.style;
+    KEYS.forEach(k => {
+      st.setProperty('--' + PREFIX[k] + '-bg', curPalette[k].bg);
+      st.setProperty('--' + PREFIX[k] + '-ink', curPalette[k].ink);
+      st.setProperty('--' + PREFIX[k] + '-icon', curPalette[k].icon);
+      const sw = $('sw-' + k); sw.style.background = curPalette[k].bg; sw.style.color = curPalette[k].ink;
+    });
+    updateThemeColor();
+  }
+  function updateThemeColor() {
+    const m = document.querySelector('meta[name=theme-color]');
+    if (m) m.content = S.cur === 'idle' ? NEUTRAL_BG : curPalette[S.cur].bg;
+  }
+
+  function setState(name) {
+    S.cur = name;
+    document.body.className = name;
+    ['idle', 'green', 'orange', 'red'].forEach(k => {
+      const el = $('s-' + k), on = k === name;
+      el.classList.toggle('on', on);
+      if (k !== 'idle') el.setAttribute('aria-hidden', on ? 'false' : 'true');
+    });
+    updateThemeColor();
+  }
+  function notice(txt) { $('notice').textContent = txt || ''; }
+
+  /* ---------- Temps passé par ambiance ---------- */
+  function micOK() {
+    const t = S.stream && S.stream.getAudioTracks()[0];
+    return !!t && t.readyState === 'live' && !t.muted;
+  }
+  // Ajoute le temps écoulé à l'ambiance en cours, uniquement si la mesure est réellement active
+  function accrue(now) {
+    if (S.running && S.cur !== 'idle' && lastT !== null && !document.hidden && micOK()) {
+      const d = now - lastT;
+      if (d > 0 && d <= MAX_GAP) cfg.session.totals[S.cur] += d;
+    }
+    lastT = now;
+  }
+
+  /* ---------- Démarrage / arrêt ---------- */
+  function goFullscreen() {
+    try {
+      const el = document.documentElement, f = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (f && !document.fullscreenElement) { const r = f.call(el); if (r && r.catch) r.catch(() => {}); }
+    } catch (e) {}
+  }
+  async function start() {
+    if (S.running) return;
+    notice('');
+    goFullscreen();
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia ||
+        !(window.AudioContext || window.webkitAudioContext)) {
+      notice("Ce navigateur ne permet pas d'utiliser le microphone ici. Ouvrez la page avec Chrome, en HTTPS.");
+      return;
+    }
+    try {
+      S.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+      });
+    } catch (e) {
+      const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+      notice(denied
+        ? "Le microphone n'est pas autorisé. Autorisez-le pour ce site dans Chrome (cadenas de la barre d'adresse), puis touchez DÉMARRER."
+        : "Aucun microphone disponible, ou microphone déjà utilisé par une autre application.");
+      return;
+    }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      S.ctx = new AC();
+      await S.ctx.resume();
+      const src = S.ctx.createMediaStreamSource(S.stream);
+      const hp = S.ctx.createBiquadFilter();       // ignore les bruits très graves (manipulation du téléphone)
+      hp.type = 'highpass'; hp.frequency.value = 100;
+      S.analyser = S.ctx.createAnalyser();
+      S.analyser.fftSize = 8192;                   // ≈ 170 ms de signal par analyse
+      S.buf = new Float32Array(S.analyser.fftSize);
+      src.connect(hp); hp.connect(S.analyser);
+    } catch (e) {
+      cleanup();
+      notice("Impossible de démarrer l'analyse sonore sur ce navigateur.");
+      return;
+    }
+    S.stream.getAudioTracks().forEach(t => {
+      t.onended = () => { if (S.running) { stop(); notice("Le microphone a été interrompu. Touchez DÉMARRER pour reprendre."); } };
+    });
+
+    S.running = true; S.smooth = null; S.cand = null;
+    setState('green');
+    await requestWake();
+    lastT = performance.now(); lastSave = lastT;
+    S.timer = setInterval(tick, TICK);
+    refreshPanel();
+  }
+  function cleanup() {
+    clearInterval(S.timer); S.timer = null;
+    if (S.stream) S.stream.getTracks().forEach(t => t.stop());
+    if (S.ctx) S.ctx.close().catch(() => {});
+    S.stream = S.ctx = S.analyser = null;
+    releaseWake();
+  }
+  function stop() {
+    if (S.running) accrue(performance.now());
+    S.running = false; S.cal = false;
+    cleanup();
+    persist();
+    $('cal').classList.remove('open');
+    setState('idle');
+    refreshPanel();
+  }
+
+  /* ---------- Écran maintenu allumé ---------- */
+  async function requestWake() {
+    if (!('wakeLock' in navigator)) {
+      notice("Le maintien de l'écran allumé n'est pas pris en charge par ce navigateur : désactivez la mise en veille dans les réglages Android.");
+      return;
+    }
+    try { S.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  function releaseWake() { try { if (S.wake) S.wake.release(); } catch (e) {} S.wake = null; }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      if (S.running) accrue(performance.now());
+      persist();
+      return;
+    }
+    if (!S.running) return;
+    lastT = performance.now();                     // le temps passé en arrière-plan n'est pas compté
+    S.smooth = null; S.cand = null;
+    const live = S.stream && S.stream.getAudioTracks().some(t => t.readyState === 'live');
+    if (!live) { stop(); notice("Le microphone s'est arrêté (application passée en arrière-plan). Touchez DÉMARRER."); return; }
+    if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume().catch(() => {});
+    requestWake();
+  });
+  window.addEventListener('pagehide', () => { if (S.running) accrue(performance.now()); persist(); });
+
+  /* ---------- Analyse sonore ---------- */
+  function tick() {
+    if (!S.analyser) return;
+    const now = performance.now();
+    if (document.hidden || !micOK()) { lastT = now; S.cand = null; return; }   // mesure inactive : rien n'est compté
+    accrue(now);
+    S.analyser.getFloatTimeDomainData(S.buf);
+    let sum = 0;
+    for (let i = 0; i < S.buf.length; i++) sum += S.buf[i] * S.buf[i];
+    const lvl = 10 * Math.log10(Math.max(sum / S.buf.length, 1e-10));   // niveau relatif interne (jamais affiché)
+    if (S.cal) S.calLv.push(lvl);
+    S.smooth = S.smooth === null ? lvl : S.smooth + ALPHA * (lvl - S.smooth);
+    decide(S.smooth + GAIN_STEP * cfg.gain, now);
+    if (now - lastSave >= SAVE_EVERY) { persist(); lastSave = now; }
+  }
+  function decide(l, now) {
+    const t = targetState(l, S.cur, thresholdsFor(cfg));
+    if (t === S.cur) { S.cand = null; return; }
+    if (S.cand !== t) { S.cand = t; S.candSince = now; return; }
+    const delay = RANK[t] > RANK[S.cur] ? UP_DELAY : DOWN_DELAY;
+    if (now - S.candSince >= delay) { setState(t); S.cand = null; }
+  }
+
+  /* ---------- Calibration ---------- */
+  async function calibrate() {
+    closePanel();
+    if (!S.running) { await start(); if (!S.running) { openPanel(); return; } }
+    S.calLv = []; S.cal = true;
+    $('cal').classList.add('open');
+    let n = 10; $('calCount').textContent = n;
+    const iv = setInterval(() => {
+      if (!S.running) { clearInterval(iv); S.cal = false; return; }
+      n--; $('calCount').textContent = Math.max(n, 0);
+      if (n <= 0) { clearInterval(iv); S.cal = false; $('cal').classList.remove('open'); finishCal(); }
+    }, 1000);
+  }
+  function finishCal() {
+    const w = $('calWarn');
+    if (S.calLv.length < 20) { openPanel(); return; }
+    const db = S.calLv.reduce((a, b) => a + b, 0) / S.calLv.length;   // niveau relatif interne, jamais affiché
+    if (db < -80) {
+      w.style.display = 'block';
+      w.textContent = "Le signal capté est extrêmement faible : le microphone est peut-être bouché ou coupé. Calibration non enregistrée.";
+    } else {
+      cfg.ref = db; cfg.calibrated = true; cfg.calTime = Date.now(); persist();
+      S.cand = null; S.smooth = null; setState('green');
+      w.style.display = 'block';
+      w.textContent = "Calibration enregistrée. Si le téléphone est déplacé, recalibrez.";
+    }
+    openPanel();
+  }
+
+  /* ---------- Espace adulte : affichage ---------- */
+  const fmtDate = ts => new Date(ts).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  function drawPie(t, p) {
+    const svg = $('pie'), sl = pieSlices(t);
+    const colors = { green: '#3f9b5c', orange: '#f0a030', red: '#d9453d' };
+    if (!sl.length) {
+      svg.innerHTML = '<circle r="1" fill="#e5e7eb"/><circle r="0.55" fill="#fff"/>';
+      svg.setAttribute('aria-label', 'Aucune donnée pour le moment');
+      return;
+    }
+    svg.innerHTML = sl.map(s => s.full
+      ? '<circle r="1" fill="' + colors[s.key] + '"/>'
+      : '<path d="' + slicePath(s.a0, s.a1) + '" fill="' + colors[s.key] + '" stroke="#fff" stroke-width="0.02" stroke-linejoin="round"/>').join('');
+    svg.setAttribute('aria-label', 'Répartition du temps : vert ' + p.green + ' %, orange ' + p.orange + ' %, rouge ' + p.red + ' %');
+  }
+  function renderStats() {
+    const t = cfg.session.totals, p = percents(t);
+    KEYS.forEach(k => {
+      $('d-' + k).textContent = fmtDuration(t[k]);
+      $('p-' + k).textContent = p[k] + ' %';
+      $('lg-' + k).textContent = p[k] + ' %';
+    });
+    // Total = somme des trois durées affichées (évite un écart d'arrondi d'une seconde)
+    $('totalT').textContent = fmtDuration(KEYS.reduce((a, k) => a + Math.floor(t[k] / 1000) * 1000, 0));
+    $('sessInfo').textContent = 'Séance commencée le ' + fmtDate(cfg.session.start) + '.';
+    drawPie(t, p);
+  }
+  function renderHistory() {
+    const box = $('hist');
+    if (!cfg.history.length) { box.innerHTML = '<p class="small">Aucune séance terminée pour le moment.</p>'; $('clearHist').style.display = 'none'; return; }
+    $('clearHist').style.display = '';
+    box.innerHTML = cfg.history.map(h => {
+      const p = percents(h.totals);
+      return '<div class="hist-row"><b>' + fmtDate(h.start) + ' → ' + fmtDate(h.end) + '</b><br>' +
+        'Vert ' + fmtDuration(h.totals.green) + ' (' + p.green + ' %) · Orange ' + fmtDuration(h.totals.orange) + ' (' + p.orange + ' %) · Rouge ' + fmtDuration(h.totals.red) + ' (' + p.red + ' %)</div>';
+    }).join('');
+  }
+  const NAME = { green: 'verte', orange: 'orange', red: 'rouge' };
+  function refreshPanel() {
+    $('runInfo').textContent = S.running ? "Écoute en cours. Ambiance actuelle : " + NAME[S.cur] + "." : "À l'arrêt : le temps n'est pas compté.";
+    $('pStart').disabled = S.running; $('pStop').disabled = !S.running;
+    $('v-so').textContent = SENS_LABELS[cfg.so + 2];
+    $('v-sr').textContent = SENS_LABELS[cfg.sr + 2];
+    $('v-gain').textContent = GAIN_LABELS[cfg.gain + 2];
+    $('intens').value = cfg.intensity;
+    $('calInfo').textContent = cfg.calibrated ? 'Calibré le ' + fmtDate(cfg.calTime || Date.now()) + '.'
+      : "Non calibré : réglage provisoire peu fiable. Calibrez avant le premier repas.";
+    $('storeWarn').style.display = storageOK ? 'none' : 'block';
+    if (!cfg.calibrated && !S.running && !$('notice').textContent) notice("Calibration à faire avant la première utilisation (Réglages).");
+    renderStats(); renderHistory();
+  }
+
+  let panelTimer = null;
+  function openPanel() {
+    refreshPanel(); $('calWarn').style.display = 'none';
+    $('overlay').classList.add('open');
+    clearInterval(panelTimer); panelTimer = setInterval(renderStats, 1000);
+  }
+  function closePanel() { $('overlay').classList.remove('open'); clearInterval(panelTimer); panelTimer = null; }
+
+  /* ---------- Confirmation ---------- */
+  let confirmCb = null;
+  function ask(msg, yesLabel, cb) {
+    $('confMsg').textContent = msg; $('confYes').textContent = yesLabel; confirmCb = cb;
+    $('confirm').classList.add('open');
+  }
+  $('confNo').addEventListener('click', () => { confirmCb = null; $('confirm').classList.remove('open'); });
+  $('confYes').addEventListener('click', () => {
+    const cb = confirmCb; confirmCb = null; $('confirm').classList.remove('open'); if (cb) cb();
+  });
+
+  function resetCounters() {
+    if (S.running) accrue(performance.now());
+    cfg.session = { start: Date.now(), totals: zeroTotals() }; persist(); refreshPanel();
+  }
+  function newSession() {
+    if (S.running) accrue(performance.now());
+    const t = cfg.session.totals;
+    if (t.green + t.orange + t.red > 0) {
+      cfg.history.unshift({ start: cfg.session.start, end: Date.now(), totals: Object.assign({}, t) });
+      cfg.history = cfg.history.slice(0, HIST_MAX);
+    }
+    cfg.session = { start: Date.now(), totals: zeroTotals() }; persist(); refreshPanel();
+  }
+
+  /* ---------- Événements ---------- */
+  $('startBtn').addEventListener('click', start);
+  $('pStart').addEventListener('click', () => { closePanel(); start(); });
+  $('pStop').addEventListener('click', stop);      // le panneau reste ouvert pour lire les compteurs
+  $('closeBtn').addEventListener('click', closePanel);
+  $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closePanel(); });
+  $('calBtn').addEventListener('click', calibrate);
+  $('fsBtn').addEventListener('click', () => {
+    try {
+      if (!document.fullscreenElement) goFullscreen();
+      else (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+    } catch (e) {}
+  });
+  $('intens').addEventListener('input', e => { cfg.intensity = Number(e.target.value); applyPalette(); persist(); });
+  document.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => {
+    const [key, d] = b.dataset.step.split(':');
+    cfg[key] = Math.max(-2, Math.min(2, cfg[key] + Number(d)));
+    persist(); S.cand = null; refreshPanel();
+  }));
+  $('resetBtn').addEventListener('click', () => { cfg.so = 0; cfg.sr = 0; cfg.gain = 0; persist(); refreshPanel(); });
+  $('resetCnt').addEventListener('click', () => ask("Remettre les trois compteurs à zéro ? Cette action est définitive.", 'Remettre à zéro', resetCounters));
+  $('newSess').addEventListener('click', () => ask("Terminer la séance en cours et en commencer une nouvelle ? Les temps de la séance terminée sont conservés dans l'historique.", 'Nouvelle séance', newSession));
+  $('clearHist').addEventListener('click', () => ask("Effacer l'historique des séances précédentes ?", 'Effacer', () => { cfg.history = []; persist(); refreshPanel(); }));
+
+  // Appui long de 2 s sur « Réglages » : aucune ouverture accidentelle par un simple toucher
+  const btn = $('setBtn');
+  let holdT = null;
+  const endHold = () => { clearTimeout(holdT); holdT = null; btn.classList.remove('holding'); $('setLabel').textContent = 'Réglages'; };
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault(); endHold();
+    btn.classList.add('holding'); $('setLabel').textContent = 'Maintenir…';
+    holdT = setTimeout(() => { endHold(); openPanel(); }, HOLD_MS);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, endHold));
+  btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') e.preventDefault(); });
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  applyPalette();
+  setState('idle');
+  refreshPanel();
+})();
+</script>
+</body>
+</html>
