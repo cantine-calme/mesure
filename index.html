@@ -52,10 +52,14 @@
     -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;transition:background-color .2s ease}
   .setbtn svg{width:34px;height:34px;flex:none}
   .setbtn.holding{background:rgba(0,0,0,.2)}
+  .foottext{display:flex;flex-direction:column;align-items:center;gap:4px;width:100%}
+  .btbanner{margin:0;padding:6px 14px;border-radius:999px;background:rgba(0,0,0,.1);font-size:min(4vw,3.1vh);font-weight:700;text-align:center}
+  .btbanner[hidden]{display:none}
 
   @media (orientation:landscape) and (max-height:520px){
     .foot{flex-direction:row;justify-content:space-between;align-items:center;padding:0 12px 8px}
-    .signature{flex:1;font-size:min(3vw,4.6vh)}
+    .foottext{flex:1;width:auto}
+    .signature{font-size:min(3vw,4.6vh)}
     .setbtn{min-height:56px;font-size:18px;padding:0 18px 0 14px}
     .setbtn svg{width:28px;height:28px}
     .state{gap:1.6vh;padding:1vh 5vw}
@@ -181,7 +185,10 @@
   </main>
 
   <footer class="foot">
-    <p class="signature">Bien manger, bien parler, bien vivre ensemble.</p>
+    <div class="foottext">
+      <p class="btbanner" id="btBanner" hidden>Tablette déconnectée – reconnexion…</p>
+      <p class="signature">Bien manger, bien parler, bien vivre ensemble.</p>
+    </div>
     <!-- Appui long de 2 secondes pour ouvrir l'espace adulte -->
     <button class="setbtn" id="setBtn" aria-label="Réglages, espace adulte : maintenir le doigt 2 secondes">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -238,6 +245,13 @@
       <button class="sbtn alt" id="clearHist">Effacer l'historique</button>
     </details>
     <div class="warn" id="storeWarn" style="display:none">Le stockage du navigateur est indisponible (navigation privée ou stockage bloqué) : les compteurs et réglages ne seront pas conservés après fermeture.</div>
+
+    <h3>Écran de la tablette (Bluetooth)</h3>
+    <p class="small">La tablette affiche la même couleur et les mêmes messages que ce téléphone. Elle ne mesure rien et n'a aucun réglage. Seuls l'état, les couleurs et les textes lui sont envoyés : jamais de son.</p>
+    <div class="readout" id="btStatus"></div>
+    <button class="sbtn" id="btConnect">Connecter la tablette</button>
+    <button class="sbtn alt" id="btOff">Ne plus utiliser la tablette</button>
+    <p class="small" id="btHelp"></p>
 
     <h3>Intensité des couleurs</h3>
     <p class="small">Un seul curseur règle ensemble le vert, l'orange et le rouge.</p>
@@ -411,7 +425,7 @@
   const int = (v, a, b, d) => Math.round(num(v, a, b, d));
 
   function defaults() {
-    return { ref: -40, calibrated: false, calTime: null, so: 0, sr: 0, gain: 0, intensity: 50,
+    return { ref: -40, calibrated: false, calTime: null, so: 0, sr: 0, gain: 0, intensity: 50, tablet: false,
              session: { start: Date.now(), totals: zeroTotals() }, history: [] };
   }
   function cleanTotals(t) {
@@ -426,6 +440,7 @@
     d.calTime = typeof s.calTime === 'number' ? s.calTime : null;
     d.so = int(s.so, -2, 2, 0); d.sr = int(s.sr, -2, 2, 0); d.gain = int(s.gain, -2, 2, 0);
     d.intensity = int(s.intensity, 0, 100, 50);
+    d.tablet = s.tablet === true;
     if (s.session && typeof s.session === 'object') {
       d.session = { start: num(s.session.start, 0, 1e15, Date.now()), totals: cleanTotals(s.session.totals) };
     }
@@ -471,6 +486,7 @@
       const sw = $('sw-' + k); sw.style.background = curPalette[k].bg; sw.style.color = curPalette[k].ink;
     });
     updateThemeColor();
+    pushState();
   }
   function updateThemeColor() {
     const m = document.querySelector('meta[name=theme-color]');
@@ -486,6 +502,7 @@
       if (k !== 'idle') el.setAttribute('aria-hidden', on ? 'false' : 'true');
     });
     updateThemeColor();
+    pushState();
   }
   function notice(txt) { $('notice').textContent = txt || ''; }
 
@@ -700,7 +717,7 @@
       : "Non calibré : réglage provisoire peu fiable. Calibrez avant le premier repas.";
     $('storeWarn').style.display = storageOK ? 'none' : 'block';
     if (!cfg.calibrated && !S.running && !$('notice').textContent) notice("Calibration à faire avant la première utilisation (Réglages).");
-    renderStats(); renderHistory();
+    renderStats(); renderHistory(); renderTabletUI();
   }
 
   let panelTimer = null;
@@ -710,6 +727,165 @@
     clearInterval(panelTimer); panelTimer = setInterval(renderStats, 1000);
   }
   function closePanel() { $('overlay').classList.remove('open'); clearInterval(panelTimer); panelTimer = null; }
+
+  /* ---------- Écran de la tablette (Bluetooth classique, via Web Serial) ---------- */
+  // L'application « Écran cantine » de la tablette écoute en Bluetooth classique (RFCOMM). Ce téléphone lui envoie une
+  // ligne de texte (JSON) à chaque changement, puis toutes les 2 s : état, couleurs et textes affichés. Jamais de son.
+  // La tablette répond « ok » à chaque ligne : sans réponse pendant 6 s, la liaison est considérée comme perdue.
+  const BT_UUID = '5f3c2a10-8b6e-4d7a-9c41-2e6f0b7a1d93';
+  const BT_OK_TIMEOUT = 6000, BT_SEND_EVERY = 2000, BT_RETRY_EVERY = 3000;
+  const hasSerial = 'serial' in navigator && !!navigator.serial && typeof navigator.serial.requestPort === 'function';
+  const T = { port: null, lastPort: null, writer: null, reader: null, connected: false, lastOk: 0, busy: false, retryTimer: null, tick: 0, msg: '' };
+  const withTimeout = (p, ms) => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, ms))]);
+
+  function hslToHex(str) {
+    const m = String(str).match(/hsl\(([\d.]+),([\d.]+)%,([\d.]+)%\)/);
+    if (!m) return '#e8eef3';
+    const h = +m[1], s = +m[2] / 100, l = +m[3] / 100, a = s * Math.min(l, 1 - l);
+    const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+    const x = v => Math.round(v * 255).toString(16).padStart(2, '0');
+    return '#' + x(f(0)) + x(f(8)) + x(f(4));
+  }
+  // Ce que la tablette affiche est lu directement dans l'écran du téléphone : mêmes textes, mêmes couleurs.
+  function buildPayload() {
+    const name = S.cur, sec = document.getElementById('s-' + name);
+    const col = name === 'idle' ? { bg: NEUTRAL_BG, ink: '#1f3a4d', icon: '#4b6b80' }
+      : { bg: hslToHex(curPalette[name].bg), ink: hslToHex(curPalette[name].ink), icon: hslToHex(curPalette[name].icon) };
+    const lines = []; let title = '';
+    Array.prototype.forEach.call(sec.children, el => {
+      if (el.tagName === 'H1') title = el.textContent.trim();
+      else if (el.classList.contains('m') || el.classList.contains('sub')) lines.push({ x: el.textContent.trim(), b: el.classList.contains('strong') ? 1 : 0 });
+      else if (el.classList.contains('sep')) lines.push({ sep: 1 });
+    });
+    return { v: 1, s: name, bg: col.bg, ink: col.ink, ic: col.icon, i: { green: 'sprout', orange: 'waves', red: 'ear', idle: '' }[name],
+             t: title, l: lines, g: document.querySelector('.signature').textContent.trim() };
+  }
+  async function btSend() {
+    if (!T.connected || !T.writer) return;
+    try { await T.writer.write(new TextEncoder().encode(JSON.stringify(buildPayload()) + '\n')); }
+    catch (e) { btLost(); }
+  }
+  function pushState() { if (T.connected) btSend(); }
+
+  async function btReadLoop(reader) {
+    const dec = new TextDecoder(); let buf = '';
+    try {
+      for (;;) {
+        const r = await reader.read();
+        if (r.done) break;
+        buf += dec.decode(r.value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+          if (line === 'ok') T.lastOk = performance.now();
+        }
+      }
+    } catch (e) {}
+    if (T.reader === reader) btLost();
+  }
+  async function btClosePort() {
+    const w = T.writer, r = T.reader, p = T.port;
+    T.writer = T.reader = null; T.connected = false;
+    try { if (r) { await withTimeout(r.cancel().catch(() => {}), 1500); try { r.releaseLock(); } catch (e) {} } } catch (e) {}
+    try { if (w) { await withTimeout(w.abort().catch(() => {}), 1500); try { w.releaseLock(); } catch (e) {} } } catch (e) {}
+    try { if (p) await withTimeout(p.close().catch(() => {}), 2000); } catch (e) {}
+    T.port = null;
+  }
+  async function btOpen(port) {
+    if (T.busy) return false;
+    T.busy = true;
+    try {
+      try { await port.open({ baudRate: 115200 }); }
+      catch (e) {
+        if (e && e.name === 'InvalidStateError') { await withTimeout(port.close(), 2000); await port.open({ baudRate: 115200 }); }
+        else throw e;
+      }
+      T.port = T.lastPort = port;
+      T.writer = port.writable.getWriter(); T.reader = port.readable.getReader();
+      T.lastOk = performance.now(); T.tick = 0; T.connected = true; T.msg = '';
+      btReadLoop(T.reader); btSend();
+      return true;
+    } catch (e) {
+      await btClosePort();
+      return false;
+    } finally { T.busy = false; renderTabletUI(); }
+  }
+  function btLost() {
+    if (!T.connected) return;
+    T.connected = false; renderTabletUI();
+    btClosePort().then(scheduleRetry);
+  }
+  function scheduleRetry() {
+    clearTimeout(T.retryTimer); T.retryTimer = null;
+    if (cfg.tablet && hasSerial) T.retryTimer = setTimeout(btRetry, BT_RETRY_EVERY);
+  }
+  async function findGrantedPort() {
+    try {
+      for (const p of await navigator.serial.getPorts()) {
+        const info = p.getInfo ? p.getInfo() : {};
+        if (info && info.bluetoothServiceClassId && String(info.bluetoothServiceClassId).toLowerCase() === BT_UUID) return p;
+      }
+    } catch (e) {}
+    return null;
+  }
+  async function btRetry() {
+    T.retryTimer = null;
+    if (!cfg.tablet || T.connected) return;
+    if (!T.busy) {
+      const port = T.lastPort || await findGrantedPort();
+      if (port && await btOpen(port)) return;
+    }
+    scheduleRetry();
+  }
+  function btTick() {
+    if (!cfg.tablet || !T.connected) return;
+    if (performance.now() - T.lastOk > BT_OK_TIMEOUT) { btLost(); return; }
+    T.tick++;
+    if (T.tick % (BT_SEND_EVERY / 1000) === 0) btSend();
+  }
+  // Doit être déclenchée par un toucher de l'adulte (exigence de Chrome pour choisir un appareil)
+  async function btConnect() {
+    if (!hasSerial || T.busy) return;
+    setBtMsg('');
+    let port;
+    try {
+      port = await navigator.serial.requestPort({ allowedBluetoothServiceClassIds: [BT_UUID], filters: [{ bluetoothServiceClassId: BT_UUID }] });
+    } catch (e) {
+      setBtMsg(e && e.name === 'NotFoundError' ? "Aucune tablette choisie. Vérifiez que « Écran cantine » est ouvert sur la tablette et jumelée." : "Impossible d'afficher la liste des appareils Bluetooth.");
+      return;
+    }
+    cfg.tablet = true; persist();
+    await btClosePort();
+    if (!(await btOpen(port))) { T.lastPort = port; setBtMsg("Connexion impossible. Ouvrez « Écran cantine » sur la tablette puis réessayez."); scheduleRetry(); }
+    renderTabletUI();
+  }
+  async function btOff() {
+    cfg.tablet = false; persist();
+    clearTimeout(T.retryTimer); T.retryTimer = null;
+    await btClosePort();
+    try { if (T.lastPort && T.lastPort.forget) await T.lastPort.forget(); } catch (e) {}
+    T.lastPort = null; T.msg = '';
+    renderTabletUI();
+  }
+  function setBtMsg(t) { T.msg = t; renderTabletUI(); }
+  function renderTabletUI() {
+    const st = $('btStatus');
+    $('btBanner').hidden = !(cfg.tablet && hasSerial && !T.connected);
+    if (!hasSerial) st.textContent = "Ce navigateur ne permet pas la liaison Bluetooth avec la tablette. Utilisez Chrome à jour sur Android.";
+    else if (T.connected) st.textContent = 'Tablette connectée ✓';
+    else if (cfg.tablet) st.textContent = 'Tablette déconnectée : reconnexion en cours…';
+    else st.textContent = 'Aucune tablette utilisée.';
+    if (T.msg) st.textContent += ' ' + T.msg;
+    $('btConnect').disabled = !hasSerial || T.busy;
+    $('btConnect').textContent = cfg.tablet ? 'Choisir une autre tablette / reconnecter' : 'Connecter la tablette';
+    $('btOff').style.display = cfg.tablet ? '' : 'none';
+    $('btHelp').textContent = "1) Jumelez les deux appareils dans les réglages Bluetooth d'Android. 2) Ouvrez « Écran cantine » sur la tablette. 3) Touchez « Connecter la tablette » et choisissez-la dans la liste.";
+  }
+  function btInit() {
+    setInterval(btTick, 1000);
+    if (cfg.tablet && hasSerial) setTimeout(btRetry, 600);
+    renderTabletUI();
+  }
 
   /* ---------- Confirmation ---------- */
   let confirmCb = null;
@@ -743,6 +919,8 @@
   $('closeBtn').addEventListener('click', closePanel);
   $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closePanel(); });
   $('calBtn').addEventListener('click', calibrate);
+  $('btConnect').addEventListener('click', btConnect);
+  $('btOff').addEventListener('click', btOff);
   $('fsBtn').addEventListener('click', () => {
     try {
       if (!document.fullscreenElement) goFullscreen();
@@ -776,6 +954,7 @@
   applyPalette();
   setState('idle');
   refreshPanel();
+  btInit();
 })();
 </script>
 </body>
