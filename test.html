@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test Bluetooth</title>
+<style>
+body{font-family:sans-serif;margin:0;padding:16px;background:#fff;color:#111;font-size:18px}
+h1{font-size:22px;margin:0 0 12px}
+button{display:block;width:100%;padding:16px;margin:10px 0;font-size:18px;border-radius:12px;border:2px solid #444;background:#eef}
+pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:12px;border-radius:8px;font-size:15px}
+</style></head><body>
+<h1>Test Bluetooth</h1>
+<pre id="info"></pre>
+<button id="b1">Test 1 : service de l'application</button>
+<button id="b2">Test 2 : service série standard</button>
+<button id="b3">Test 3 : sans filtre</button>
+<button id="b4">Test 4 : appareils déjà autorisés</button>
+<pre id="log">Appuyez sur un test, puis regardez la liste proposée par Chrome.</pre>
+<script>
+const UUID='5f3c2a10-8b6e-4d7a-9c41-2e6f0b7a1d93';
+const SPP='00001101-0000-1000-8000-00805f9b34fb';
+const $=id=>document.getElementById(id);
+const log=t=>{$('log').textContent+='\n'+t};
+const has='serial' in navigator && !!navigator.serial;
+$('info').textContent='Chrome : '+(navigator.userAgent.match(/Chrome\/[\d.]+/)||['?'])[0]+
+ '\nHTTPS : '+window.isSecureContext+'\nWeb Serial présent : '+has;
+async function run(name,opts){
+  $('log').textContent='== '+name+' ==';
+  if(!has){log('Web Serial absent');return}
+  try{
+    const p=await navigator.serial.requestPort(opts);
+    let i={};try{i=p.getInfo()}catch(e){}
+    log('CHOISI : '+JSON.stringify(i));
+    try{await p.open({baudRate:115200});log('OUVERT : OUI, la liaison fonctionne');await p.close()}
+    catch(e){log('Ouverture impossible : '+e.name+' - '+e.message)}
+  }catch(e){log('Résultat : '+e.name+' - '+e.message)}
+}
+$('b1').onclick=()=>run('Test 1',{allowedBluetoothServiceClassIds:[UUID],filters:[{bluetoothServiceClassId:UUID}]});
+$('b2').onclick=()=>run('Test 2',{allowedBluetoothServiceClassIds:[SPP],filters:[{bluetoothServiceClassId:SPP}]});
+$('b3').onclick=()=>run('Test 3',undefined);
+$('b4').onclick=async()=>{
+  $('log').textContent='== Test 4 ==';
+  if(!has){log('Web Serial absent');return}
+  try{const ps=await navigator.serial.getPorts();log('Appareils autorisés : '+ps.length);
+   ps.forEach(p=>{try{log(JSON.stringify(p.getInfo()))}catch(e){}})}
+  catch(e){log(e.name+' - '+e.message)}
+};
+</script></body></html>
